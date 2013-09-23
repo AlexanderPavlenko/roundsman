@@ -167,7 +167,7 @@ require 'tempfile'
     namespace :chef do
 
       set_default :chef_version, "~> 11.6.0"
-      set_default :chef_environment { fetch(:rails_env) }
+      set_default(:chef_environment) { fetch(:rails_env) }
       set_default :cookbooks_directory, ["config/cookbooks"]
       set_default :databags_directory, "config/data_bags"
       set_default :roles_directory, "config/roles"
