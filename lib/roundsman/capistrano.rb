@@ -281,7 +281,11 @@ require 'tempfile'
           next if fetch(:filter_sensitive_settings).find { |regex| regex.match(key.to_s) }
           real_value = if value.respond_to?(:call)
             begin
-              value.call(*args[0...value.arity])
+              if key.to_sym == :run_list
+                value.call(*args[0...value.arity])
+              else
+                value.call
+              end
             rescue ::Capistrano::CommandError => e
               logger.debug "Could not get the value of #{key}: #{e.message}"
               nil
