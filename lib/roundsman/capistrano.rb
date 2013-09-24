@@ -266,20 +266,22 @@ require 'tempfile'
       end
 
       def generate_attributes
-        attrs = remove_procs_from_hash variables.dup
-        put attrs.to_json, roundsman_working_dir("solo.json"), :via => :scp
+        find_servers_for_task(current_task).each do |server|
+          attrs = remove_procs_from_hash(variables.dup, server)
+          put attrs.to_json, roundsman_working_dir("solo.json"), :via => :scp
+        end
       end
 
       # Recursively removes procs from hashes. Procs can exist because you specified them like this:
       #
       #     set(:root_password) { Capistrano::CLI.password_prompt("Root password: ") }
-      def remove_procs_from_hash(hash)
+      def remove_procs_from_hash(hash, *args)
         new_hash = {}
         hash.each do |key, value|
           next if fetch(:filter_sensitive_settings).find { |regex| regex.match(key.to_s) }
           real_value = if value.respond_to?(:call)
             begin
-              value.call
+              value.call(*args[0...value.arity])
             rescue ::Capistrano::CommandError => e
               logger.debug "Could not get the value of #{key}: #{e.message}"
               nil
