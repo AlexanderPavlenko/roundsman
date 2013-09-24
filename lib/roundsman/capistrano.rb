@@ -206,7 +206,7 @@ require 'tempfile'
 
       desc "Runs the existing chef configuration"
       task :chef_solo, :except => { :no_release => true } do
-        logger.info "Now running #{fetch(:run_list).join(', ')}"
+        logger.info "Now running chef-solo..."
         old_sudo = self[:sudo]
         if self[:rvm_type] == :user
           self[:sudo] = "rvmsudo_secure_path=1 #{File.join(rvm_bin_path, "rvmsudo")}"
@@ -217,7 +217,7 @@ require 'tempfile'
       end
 
       def ensure_cookbooks_exists
-        abort "You must specify at least one recipe when running roundsman.chef" if fetch(:run_list, []).empty?
+        abort "You must specify at least one recipe when running roundsman.chef" if variables[:run_list].blank?
         abort "No cookbooks found in #{fetch(:cookbooks_directory).inspect}" if cookbooks_paths.empty?
       end
 
@@ -254,8 +254,8 @@ require 'tempfile'
           root = File.expand_path(File.dirname(__FILE__))
           file_cache_path File.join(root, "cache")
           cookbook_path [ #{cookbook_string} ]
-          roles_path #{fetch(:roles_directory).to_s.inspect}
-          environments_path #{fetch(:environments_directory).to_s.inspect}
+          role_path File.join(root, #{fetch(:roles_directory).to_s.inspect})
+          environment_path File.join(root, #{fetch(:environments_directory).to_s.inspect})
           verbose_logging #{fetch(:verbose_logging)}
           data_bag_path File.join(root, #{fetch(:databags_directory).to_s.inspect})
         RUBY
@@ -291,7 +291,7 @@ require 'tempfile'
           end
 
           if real_value.is_a?(Hash)
-            real_value = remove_procs_from_hash(real_value)
+            real_value = remove_procs_from_hash(real_value, *args)
           end
           if real_value != nil && !real_value.class.to_s.include?("Capistrano") # skip capistrano tasks
             new_hash[key] = real_value
