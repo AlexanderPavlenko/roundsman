@@ -244,8 +244,10 @@ require 'tempfile'
 
       def install_chef?
         required_version = fetch(:chef_version).inspect
-        output = capture("gem list -i -v #{required_version} || true").strip
-        output == "false"
+        find_servers_for_task(current_task).any? do |server|
+          output = capture("gem list -i -v #{required_version} || true", :hosts => [server]).strip
+          output == "false"
+        end
       end
 
       def generate_config
