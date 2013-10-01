@@ -128,7 +128,7 @@ require 'tempfile'
         }
       end
 
-      task :default, :except => { :no_release => true } do
+      task :default, :except => { :no_chef => true } do
         if install_ruby?
           dependencies
           ruby
@@ -136,13 +136,13 @@ require 'tempfile'
       end
 
       desc "Installs ruby."
-      task :ruby, :except => { :no_release => true } do
+      task :ruby, :except => { :no_chef => true } do
         put fetch(:ruby_install_script), roundsman_working_dir("install_ruby.sh"), :via => :scp
         sudo "bash #{roundsman_working_dir("install_ruby.sh")}"
       end
 
       desc "Installs the dependencies needed for Ruby"
-      task :dependencies, :except => { :no_release => true } do
+      task :dependencies, :except => { :no_chef => true } do
         ensure_supported_distro
         sudo "#{fetch(:package_manager)} -yq update"
         sudo "#{fetch(:package_manager)} -yq install #{fetch(:ruby_dependencies).join(' ')}"
@@ -176,14 +176,14 @@ require 'tempfile'
       set_default :verbose_logging, true
       set_default :filter_sensitive_settings, [ /password/, /filter_sensitive_settings/ ]
 
-      task :default, :except => { :no_release => true } do
+      task :default, :except => { :no_chef => true } do
         ensure_cookbooks_exists
         prepare_chef
         chef_solo
       end
 
       desc "Generates the config and copies over the cookbooks to the server"
-      task :prepare_chef, :except => { :no_release => true } do
+      task :prepare_chef, :except => { :no_chef => true } do
         install if fetch(:run_roundsman_checks, true) && install_chef?
         ensure_cookbooks_exists
         generate_config
@@ -192,7 +192,7 @@ require 'tempfile'
       end
 
       desc "Installs chef"
-      task :install, :except => { :no_release => true } do
+      task :install, :except => { :no_chef => true } do
         if self[:rvm_type] == :user
           run "gem uninstall -xaI chef || true"
           run "gem install chef -v #{fetch(:chef_version).inspect} --quiet --no-ri --no-rdoc"
@@ -205,7 +205,7 @@ require 'tempfile'
       end
 
       desc "Runs the existing chef configuration"
-      task :chef_solo, :except => { :no_release => true } do
+      task :chef_solo, :except => { :no_chef => true } do
         logger.info "Now running chef-solo..."
         old_sudo = self[:sudo]
         if self[:rvm_type] == :user
@@ -260,7 +260,7 @@ require 'tempfile'
           data_bag_path File.join(root, #{fetch(:databags_directory).to_s.inspect})
         RUBY
         if (chef_env = fetch(:chef_environment))
-          solo_rb = [solo_rb, "chef_environment #{chef_env.to_s.inspect}"].join("\n")
+          solo_rb = [solo_rb, "environment #{chef_env.to_s.inspect}"].join("\n")
         end
         put solo_rb, roundsman_working_dir("solo.rb"), :via => :scp
       end
