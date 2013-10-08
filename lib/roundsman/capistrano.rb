@@ -256,7 +256,7 @@ require 'tempfile'
       def generate_attributes
         find_servers_for_task(current_task).each do |server|
           attrs = remove_procs_from_hash(variables.dup, server)
-          put attrs.to_json, roundsman_working_dir("solo.json"), :via => :scp
+          put attrs.to_json, roundsman_working_dir("solo.json"), :via => :scp, :hosts => [server]
         end
       end
 
