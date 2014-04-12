@@ -203,7 +203,7 @@ require 'tempfile'
       end
 
       def ensure_cookbooks_exists
-        abort "You must specify at least one recipe when running roundsman.chef" if variables[:run_list].blank?
+        abort "You must specify at least one recipe when running roundsman.chef" if variables[:run_list].empty?
         abort "No cookbooks found in #{fetch(:cookbooks_directory).inspect}" if cookbooks_paths.empty?
       end
 
