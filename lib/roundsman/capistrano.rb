@@ -128,7 +128,7 @@ require 'tempfile'
         }
       end
 
-      task :default, :except => { :no_release => true } do
+      task :default, :except => { :no_chef => true } do
         if install_ruby?
           dependencies
           ruby
@@ -136,13 +136,13 @@ require 'tempfile'
       end
 
       desc "Installs ruby."
-      task :ruby, :except => { :no_release => true } do
+      task :ruby, :except => { :no_chef => true } do
         put fetch(:ruby_install_script), roundsman_working_dir("install_ruby.sh"), :via => :scp
         sudo "bash #{roundsman_working_dir("install_ruby.sh")}"
       end
 
       desc "Installs the dependencies needed for Ruby"
-      task :dependencies, :except => { :no_release => true } do
+      task :dependencies, :except => { :no_chef => true } do
         ensure_supported_distro
         sudo "#{fetch(:package_manager)} -yq update"
         sudo "#{fetch(:package_manager)} -yq install #{fetch(:ruby_dependencies).join(' ')}"
@@ -166,21 +166,24 @@ require 'tempfile'
 
     namespace :chef do
 
-      set_default :chef_version, "~> 10.18.2"
+      set_default :chef_version, "~> 11.6.0"
+      set_default(:chef_environment) { fetch(:rails_env) }
       set_default :cookbooks_directory, ["config/cookbooks"]
       set_default :databags_directory, "config/data_bags"
+      set_default :roles_directory, "config/roles"
+      set_default :environments_directory, "config/environments"
       set_default :copyfile_disable, false
       set_default :verbose_logging, true
       set_default :filter_sensitive_settings, [ /password/, /filter_sensitive_settings/ ]
 
-      task :default, :except => { :no_release => true } do
+      task :default, :except => { :no_chef => true } do
         ensure_cookbooks_exists
         prepare_chef
         chef_solo
       end
 
       desc "Generates the config and copies over the cookbooks to the server"
-      task :prepare_chef, :except => { :no_release => true } do
+      task :prepare_chef, :except => { :no_chef => true } do
         install if fetch(:run_roundsman_checks, true) && install_chef?
         ensure_cookbooks_exists
         generate_config
@@ -189,32 +192,18 @@ require 'tempfile'
       end
 
       desc "Installs chef"
-      task :install, :except => { :no_release => true } do
-        if self[:rvm_type] == :user
-          run "gem uninstall -xaI chef || true"
-          run "gem install chef -v #{fetch(:chef_version).inspect} --quiet --no-ri --no-rdoc"
-          run "gem install ruby-shadow --quiet --no-ri --no-rdoc"
-        else
-          sudo "gem uninstall -xaI chef || true"
-          sudo "gem install chef -v #{fetch(:chef_version).inspect} --quiet --no-ri --no-rdoc"
-          sudo "gem install ruby-shadow --quiet --no-ri --no-rdoc"
-        end
+      task :install, :except => { :no_chef => true } do
+        sudo "sh -c 'curl -L https://www.opscode.com/chef/install.sh | bash'"
       end
 
       desc "Runs the existing chef configuration"
-      task :chef_solo, :except => { :no_release => true } do
-        logger.info "Now running #{fetch(:run_list).join(', ')}"
-        old_sudo = self[:sudo]
-        if self[:rvm_type] == :user
-          self[:sudo] = "rvmsudo_secure_path=1 #{File.join(rvm_bin_path, "rvmsudo")}"
-        end
-
+      task :chef_solo, :except => { :no_chef => true } do
+        logger.info "Now running chef-solo..."
         sudo "chef-solo -c #{roundsman_working_dir("solo.rb")} -j #{roundsman_working_dir("solo.json")}#{' -l debug' if fetch(:debug_chef)}"
-        self[:sudo] = old_sudo
       end
 
       def ensure_cookbooks_exists
-        abort "You must specify at least one recipe when running roundsman.chef" if fetch(:run_list, []).empty?
+        abort "You must specify at least one recipe when running roundsman.chef" if variables[:run_list].empty?
         abort "No cookbooks found in #{fetch(:cookbooks_directory).inspect}" if cookbooks_paths.empty?
       end
 
@@ -222,15 +211,29 @@ require 'tempfile'
         Array(fetch(:cookbooks_directory)).select { |path| File.exist?(path) }
       end
 
+      def cap_path_if_exists(cap_config_name)
+        path = fetch(cap_config_name.to_sym)
+        File.exists?(path) ? path : nil
+      end
+
       def databags_path
-        path = fetch(:databags_directory)
-        File.exist?(path) ? path : nil
+        cap_path_if_exists(:databags_directory)
+      end
+
+      def roles_path
+        cap_path_if_exists(:roles_directory)
+      end
+
+      def environments_path
+        cap_path_if_exists(:environments_directory)
       end
 
       def install_chef?
         required_version = fetch(:chef_version).inspect
-        output = capture("gem list -i -v #{required_version} || true").strip
-        output == "false"
+        find_servers_for_task(current_task).any? do |server|
+          output = capture("which chef-solo || echo 'false'", :hosts => [server]).strip
+          output == "false"
+        end
       end
 
       def generate_config
@@ -239,27 +242,38 @@ require 'tempfile'
           root = File.expand_path(File.dirname(__FILE__))
           file_cache_path File.join(root, "cache")
           cookbook_path [ #{cookbook_string} ]
+          role_path File.join(root, #{fetch(:roles_directory).to_s.inspect})
+          environment_path File.join(root, #{fetch(:environments_directory).to_s.inspect})
           verbose_logging #{fetch(:verbose_logging)}
           data_bag_path File.join(root, #{fetch(:databags_directory).to_s.inspect})
         RUBY
+        if (chef_env = fetch(:chef_environment))
+          solo_rb = [solo_rb, "environment #{chef_env.to_s.inspect}"].join("\n")
+        end
         put solo_rb, roundsman_working_dir("solo.rb"), :via => :scp
       end
 
       def generate_attributes
-        attrs = remove_procs_from_hash variables.dup
-        put attrs.to_json, roundsman_working_dir("solo.json"), :via => :scp
+        find_servers_for_task(current_task).each do |server|
+          attrs = remove_procs_from_hash(variables.dup, server)
+          put attrs.to_json, roundsman_working_dir("solo.json"), :via => :scp, :hosts => [server]
+        end
       end
 
       # Recursively removes procs from hashes. Procs can exist because you specified them like this:
       #
       #     set(:root_password) { Capistrano::CLI.password_prompt("Root password: ") }
-      def remove_procs_from_hash(hash)
+      def remove_procs_from_hash(hash, *args)
         new_hash = {}
         hash.each do |key, value|
           next if fetch(:filter_sensitive_settings).find { |regex| regex.match(key.to_s) }
           real_value = if value.respond_to?(:call)
             begin
-              value.call
+              if key.to_sym == :run_list
+                value.call(*args[0...value.arity])
+              else
+                value.call
+              end
             rescue ::Capistrano::CommandError => e
               logger.debug "Could not get the value of #{key}: #{e.message}"
               nil
@@ -269,7 +283,7 @@ require 'tempfile'
           end
 
           if real_value.is_a?(Hash)
-            real_value = remove_procs_from_hash(real_value)
+            real_value = remove_procs_from_hash(real_value, *args)
           end
           if real_value != nil && !real_value.class.to_s.include?("Capistrano") # skip capistrano tasks
             new_hash[key] = real_value
@@ -283,7 +297,7 @@ require 'tempfile'
         begin
           tar_file.close
           env_vars = fetch(:copyfile_disable) && RUBY_PLATFORM.downcase.include?('darwin') ? "COPYFILE_DISABLE=true" : ""
-          system "#{env_vars} tar -cjf #{tar_file.path} #{cookbooks_paths.join(' ')} #{databags_path.to_s}"
+          system "#{env_vars} tar -cjf #{tar_file.path} #{cookbooks_paths.join(' ')} #{databags_path.to_s} #{roles_path.to_s} #{environments_path.to_s}"
           upload tar_file.path, roundsman_working_dir("cookbooks.tar"), :via => :scp
           run "cd #{roundsman_working_dir} && tar -xjf cookbooks.tar"
         ensure
