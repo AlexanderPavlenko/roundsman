@@ -167,11 +167,8 @@ require 'tempfile'
     namespace :chef do
 
       set_default :chef_version, "~> 11.6.0"
-      set_default(:chef_environment) { fetch(:rails_env) }
       set_default :cookbooks_directory, ["config/cookbooks"]
       set_default :databags_directory, "config/data_bags"
-      set_default :roles_directory, "config/roles"
-      set_default :environments_directory, "config/environments"
       set_default :copyfile_disable, false
       set_default :verbose_logging, true
       set_default :filter_sensitive_settings, [ /password/, /filter_sensitive_settings/ ]
@@ -211,21 +208,9 @@ require 'tempfile'
         Array(fetch(:cookbooks_directory)).select { |path| File.exist?(path) }
       end
 
-      def cap_path_if_exists(cap_config_name)
-        path = fetch(cap_config_name.to_sym)
-        File.exists?(path) ? path : nil
-      end
-
       def databags_path
-        cap_path_if_exists(:databags_directory)
-      end
-
-      def roles_path
-        cap_path_if_exists(:roles_directory)
-      end
-
-      def environments_path
-        cap_path_if_exists(:environments_directory)
+        path = fetch(:databags_directory)
+        File.exist?(path) ? path : nil
       end
 
       def install_chef?
@@ -242,14 +227,9 @@ require 'tempfile'
           root = File.expand_path(File.dirname(__FILE__))
           file_cache_path File.join(root, "cache")
           cookbook_path [ #{cookbook_string} ]
-          role_path File.join(root, #{fetch(:roles_directory).to_s.inspect})
-          environment_path File.join(root, #{fetch(:environments_directory).to_s.inspect})
           verbose_logging #{fetch(:verbose_logging)}
           data_bag_path File.join(root, #{fetch(:databags_directory).to_s.inspect})
         RUBY
-        if (chef_env = fetch(:chef_environment))
-          solo_rb = [solo_rb, "environment #{chef_env.to_s.inspect}"].join("\n")
-        end
         put solo_rb, roundsman_working_dir("solo.rb"), :via => :scp
       end
 
@@ -297,7 +277,7 @@ require 'tempfile'
         begin
           tar_file.close
           env_vars = fetch(:copyfile_disable) && RUBY_PLATFORM.downcase.include?('darwin') ? "COPYFILE_DISABLE=true" : ""
-          system "#{env_vars} tar -cjf #{tar_file.path} #{cookbooks_paths.join(' ')} #{databags_path.to_s} #{roles_path.to_s} #{environments_path.to_s}"
+          system "#{env_vars} tar -cjf #{tar_file.path} #{cookbooks_paths.join(' ')} #{databags_path.to_s}"
           upload tar_file.path, roundsman_working_dir("cookbooks.tar"), :via => :scp
           run "cd #{roundsman_working_dir} && tar -xjf cookbooks.tar"
         ensure
